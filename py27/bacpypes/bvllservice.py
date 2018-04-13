@@ -542,18 +542,24 @@ class BIPForeign(BIPSAP, Client, Server, OneShotTask, DebugContents):
 
             return
 
-        elif isinstance(pdu, OriginalUnicastNPDU):
+        # check the BBMD registration status, we may not be registered
+        if self.registrationStatus != 0:
+            if _debug: BIPForeign._debug("    - packet dropped, unregistered")
+            return
+
+        if isinstance(pdu, OriginalUnicastNPDU):
             # build a vanilla PDU
             xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=pdu.pduDestination, user_data=pdu.pduUserData)
 
             # send it upstream
             self.response(xpdu)
-            return
 
-        # check the BBMD registration status, we may not be registered
-        if self.registrationStatus != 0:
-            if _debug: BIPForeign._debug("    - packet dropped, unregistered")
-            return
+        elif isinstance(pdu, ForwardedNPDU):
+            # build a PDU with the source from the real source
+            xpdu = PDU(pdu.pduData, source=pdu.bvlciAddress, destination=LocalBroadcast(), user_data=pdu.pduUserData)
+
+            # send it upstream
+            self.response(xpdu)
 
         if isinstance(pdu, ReadBroadcastDistributionTableAck):
             # send this to the service access point
@@ -562,13 +568,6 @@ class BIPForeign(BIPSAP, Client, Server, OneShotTask, DebugContents):
         elif isinstance(pdu, ReadForeignDeviceTableAck):
             # send this to the service access point
             self.sap_response(pdu)
-
-        elif isinstance(pdu, ForwardedNPDU):
-            # build a PDU with the source from the real source
-            xpdu = PDU(pdu.pduData, source=pdu.bvlciAddress, destination=LocalBroadcast(), user_data=pdu.pduUserData)
-
-            # send it upstream
-            self.response(xpdu)
 
         elif isinstance(pdu, WriteBroadcastDistributionTable):
             # build a response
