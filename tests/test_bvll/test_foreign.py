@@ -12,12 +12,19 @@ from bacpypes.debugging import bacpypes_debugging, ModuleLogger, xtob
 
 from bacpypes.pdu import Address, PDU, LocalBroadcast
 from bacpypes.vlan import IPNetwork, IPRouter
-from bacpypes.bvll import ReadForeignDeviceTable, ReadForeignDeviceTableAck
+from bacpypes.bvll import (
+    Result, RegisterForeignDevice,
+    ReadForeignDeviceTable, ReadForeignDeviceTableAck,
+    OriginalUnicastNPDU, OriginalBroadcastNPDU,
+    )
 
 from ..state_machine import StateMachineGroup
 from ..time_machine import reset_time_machine, run_time_machine
 
-from .helpers import SnifferNode, CodecNode, SimpleNode, ForeignNode, BBMDNode
+from .helpers import (
+    SnifferStateMachine, BIPSimpleStateMachine,
+    BIPForeignStateMachine, BIPBBMDStateMachine,
+    )
 
 # some debugging
 _debug = 0
@@ -51,11 +58,11 @@ class TNetwork(StateMachineGroup):
         self.router.add_network(Address("192.168.6.1/24"), self.remote_vlan)
 
         # the foreign device
-        self.fd = ForeignNode("192.168.6.2/24", self.remote_vlan)
+        self.fd = BIPForeignStateMachine("192.168.6.2/24", self.remote_vlan)
         self.append(self.fd)
 
         # bbmd
-        self.bbmd = BBMDNode("192.168.5.3/24", self.home_vlan)
+        self.bbmd = BIPBBMDStateMachine("192.168.5.3/24", self.home_vlan)
         self.append(self.bbmd)
 
     def run(self, time_limit=60.0):
@@ -70,6 +77,18 @@ class TNetwork(StateMachineGroup):
 
         # check for success
         all_success, some_failed = super(TNetwork, self).check_for_success()
+        if _debug:
+            TNetwork._debug("    - all_success, some_failed: %r, %r", all_success, some_failed)
+            for state_machine in self.state_machines:
+                if state_machine.running:
+                    TNetwork._debug("        %r (running)", state_machine)
+                elif not state_machine.current_state:
+                    TNetwork._debug("        %r (not started)", state_machine)
+                else:
+                    TNetwork._debug("        %r", state_machine)
+                for direction, pdu in state_machine.transaction_log:
+                    StateMachineGroup._debug("        %s %s", direction, str(pdu))
+
         assert all_success
 
 
@@ -97,58 +116,46 @@ class TestForeign(unittest.TestCase):
         # create a network
         tnet = TNetwork()
 
-        # add an addition codec node to the home vlan
-        cnode = CodecNode("192.168.5.2/24", tnet.home_vlan)
-        tnet.append(cnode)
-
-        # home sniffer node
-        home_sniffer = SnifferNode("192.168.5.254/24", tnet.home_vlan)
-        tnet.append(home_sniffer)
-
-        # remote sniffer node
-        remote_sniffer = SnifferNode("192.168.6.254/24", tnet.remote_vlan)
-        tnet.append(remote_sniffer)
-
         # tell the B/IP layer of the foreign device to register
         tnet.fd.start_state \
             .call(tnet.fd.bip.register, tnet.bbmd.address, 30) \
             .success()
 
-        # sniffer pieces
-        registration_request = xtob('81.05.0006'   # bvlci
-            '001e'                                  # time-to-live
-            )
-        registration_ack = xtob('81.00.0006.0000') # simple ack
+        # remote sniffer node
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
+        tnet.append(remote_sniffer)
 
-        # remote sniffer sees registration
+        # sniffer traffic
         remote_sniffer.start_state.doc("1-1-0") \
-            .receive(PDU, pduData=registration_request).doc("1-1-1") \
-            .receive(PDU, pduData=registration_ack).doc("1-1-2") \
+            .receive(RegisterForeignDevice).doc("1-1-1") \
+            .receive(Result).doc("1-1-2") \
             .set_event('fd-registered').doc("1-1-3") \
             .success()
 
         # the bbmd is idle
         tnet.bbmd.start_state.success()
 
-        # read the FDT
-        cnode.start_state.doc("1-2-0") \
+        # home snooper node
+        home_snooper = SnifferStateMachine("192.168.5.2/24", tnet.home_vlan)
+        tnet.append(home_snooper)
+
+        # snooper will read the foreign device table
+        home_snooper.start_state.doc("1-2-0") \
             .wait_event('fd-registered').doc("1-2-1") \
             .send(ReadForeignDeviceTable(destination=tnet.bbmd.address)).doc("1-2-2") \
             .receive(ReadForeignDeviceTableAck).doc("1-2-3") \
             .success()
 
-        # the tnode reads the registration table
-        read_fdt_request = xtob('81.06.0004')      # bvlci
-        read_fdt_ack = xtob('81.07.000e'           # read-ack
-            'c0.a8.06.02.ba.c0 001e 0023'           # address, ttl, remaining
-            )
+        # home sniffer node
+        home_sniffer = SnifferStateMachine("192.168.5.254/24", tnet.home_vlan)
+        tnet.append(home_sniffer)
 
-        # home sniffer sees registration
+        # sniffer traffic
         home_sniffer.start_state.doc("1-3-0") \
-            .receive(PDU, pduData=registration_request).doc("1-3-1") \
-            .receive(PDU, pduData=registration_ack).doc("1-3-2") \
-            .receive(PDU, pduData=read_fdt_request).doc("1-3-3") \
-            .receive(PDU, pduData=read_fdt_ack).doc("1-3-4") \
+            .receive(RegisterForeignDevice).doc("1-3-1") \
+            .receive(Result).doc("1-3-2") \
+            .receive(ReadForeignDeviceTable).doc("1-3-3") \
+            .receive(ReadForeignDeviceTableAck).doc("1-3-4") \
             .success()
 
         # run the group
@@ -170,21 +177,15 @@ class TestForeign(unittest.TestCase):
         tnet.bbmd.start_state.success()
 
         # remote sniffer node
-        remote_sniffer = SnifferNode("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
         tnet.append(remote_sniffer)
 
-        # sniffer pieces
-        registration_request = xtob('81.05.0006'   # bvlci
-            '000a'                                  # time-to-live
-            )
-        registration_ack = xtob('81.00.0006.0000') # simple ack
-
-        # remote sniffer sees registration
+        # sniffer traffic
         remote_sniffer.start_state.doc("2-1-0") \
-            .receive(PDU, pduData=registration_request).doc("2-1-1") \
-            .receive(PDU, pduData=registration_ack).doc("2-1-2") \
-            .receive(PDU, pduData=registration_request).doc("2-1-3") \
-            .receive(PDU, pduData=registration_ack).doc("2-1-4") \
+            .receive(RegisterForeignDevice).doc("2-1-1") \
+            .receive(Result).doc("2-1-2") \
+            .receive(RegisterForeignDevice).doc("2-1-3") \
+            .receive(Result).doc("2-1-4") \
             .success()
 
         # run the group
@@ -205,7 +206,7 @@ class TestForeign(unittest.TestCase):
         # register, wait for ack, send some beef
         tnet.fd.start_state.doc("3-1-0") \
             .call(tnet.fd.bip.register, tnet.bbmd.address, 60).doc("3-1-1") \
-            .wait_event('fd-registered').doc("3-1-2") \
+            .wait_event('3-registered').doc("3-1-2") \
             .send(pdu).doc("3-1-3") \
             .success()
 
@@ -215,24 +216,15 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # remote sniffer node
-        remote_sniffer = SnifferNode("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
         tnet.append(remote_sniffer)
 
-        # sniffer pieces
-        registration_request = xtob('81.05.0006'   # bvlci
-            '003c'                                  # time-to-live (60)
-            )
-        registration_ack = xtob('81.00.0006.0000') # simple ack
-        unicast_pdu = xtob('81.0a.0008'            # original unicast bvlci
-            'dead.beef'                             # PDU being unicast
-            )
-
-        # remote sniffer sees registration
+        # sniffer traffic
         remote_sniffer.start_state.doc("3-2-0") \
-            .receive(PDU, pduData=registration_request).doc("3-2-1") \
-            .receive(PDU, pduData=registration_ack).doc("3-2-2") \
-            .set_event('fd-registered').doc("3-2-3") \
-            .receive(PDU, pduData=unicast_pdu).doc("3-2-4") \
+            .receive(RegisterForeignDevice).doc("3-2-1") \
+            .receive(Result).doc("3-2-2") \
+            .set_event('3-registered').doc("3-2-3") \
+            .receive(OriginalUnicastNPDU).doc("3-2-4") \
             .success()
 
         # run the group
@@ -258,38 +250,29 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # the bbmd is happy when it gets the pdu
-        tnet.bbmd.start_state \
-            .receive(PDU, pduSource=tnet.fd.address, pduData=pdu_data) \
+        tnet.bbmd.start_state.doc("4-2-0") \
+            .receive(OriginalBroadcastNPDU, pduSource=tnet.fd.address, pduData=pdu_data).doc("4-2-1") \
             .success()
 
-        # home sniffer node
-        home_node = SimpleNode("192.168.5.254/24", tnet.home_vlan)
+        # home simple node
+        home_node = BIPSimpleStateMachine("192.168.5.254/24", tnet.home_vlan)
         tnet.append(home_node)
 
         # home node happy when getting the pdu, broadcast by the bbmd
-        home_node.start_state.doc("4-2-0") \
-            .receive(PDU, pduSource=tnet.fd.address, pduData=pdu_data).doc("4-2-1") \
+        home_node.start_state.doc("4-3-0") \
+            .receive(PDU, pduSource=tnet.fd.address, pduData=pdu_data).doc("4-3-1") \
             .success()
 
         # remote sniffer node
-        remote_sniffer = SnifferNode("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
         tnet.append(remote_sniffer)
 
-        # sniffer pieces
-        registration_request = xtob('81.05.0006'   # bvlci
-            '003c'                                  # time-to-live (60)
-            )
-        registration_ack = xtob('81.00.0006.0000') # simple ack
-        distribute_pdu = xtob('81.09.0008'         # bvlci
-            'deadbeef'                              # PDU to broadcast
-            )
-
-        # remote sniffer sees registration
-        remote_sniffer.start_state.doc("4-3-0") \
-            .receive(PDU, pduData=registration_request).doc("4-3-1") \
-            .receive(PDU, pduData=registration_ack).doc("4-3-2") \
+        # remote traffic
+        remote_sniffer.start_state.doc("4-4-0") \
+            .receive(RegisterForeignDevice).doc("4-4-1") \
+            .receive(Result).doc("4-4-2") \
             .set_event('4-registered') \
-            .receive(PDU, pduData=distribute_pdu).doc("4-3-3") \
+            .receive(OriginalBroadcastNPDU).doc("4-4-3") \
             .success()
 
         # run the group
