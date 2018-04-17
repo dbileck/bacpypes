@@ -51,7 +51,7 @@ class TNetwork(StateMachineGroup):
 
         # bbmd on network 7
         self.bbmd_7 = BIPBBMDStateMachine("192.168.7.3/24", self.vlan_7)
-        self.bbmd_7.bip.add_peer("192.168.8.3")
+        self.bbmd_7.bip.add_peer(Address("192.168.8.3"))
         self.append(self.bbmd_7)
 
         # make a network
@@ -60,7 +60,7 @@ class TNetwork(StateMachineGroup):
 
         # bbmd on network 8
         self.bbmd_8 = BIPBBMDNode("192.168.8.3/24", self.vlan_8)
-        self.bbmd_8.bip.add_peer("192.168.7.3")
+        self.bbmd_8.bip.add_peer(Address("192.168.7.3"))
 
         # make a network
         self.vlan_9 = IPNetwork()
