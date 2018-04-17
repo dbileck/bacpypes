@@ -161,9 +161,9 @@ class IPNetwork(Network):
     ('1.2.3.255', 5) and the other nodes must have the same tuple.
     """
 
-    def __init__(self):
+    def __init__(self, name=''):
         if _debug: IPNetwork._debug("__init__")
-        Network.__init__(self)
+        Network.__init__(self, name=name)
 
     def add_node(self, node):
         if _debug: IPNetwork._debug("add_node %r", node)
