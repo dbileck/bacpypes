@@ -83,17 +83,19 @@ class TNetwork(StateMachineGroup):
 
         # check for success
         all_success, some_failed = super(TNetwork, self).check_for_success()
-        if _debug:
-            TNetwork._debug("    - all_success, some_failed: %r, %r", all_success, some_failed)
+        TNetwork._debug("    - all_success, some_failed: %r, %r", all_success, some_failed)
+
+        if _debug and (not all_success):
             for state_machine in self.state_machines:
                 if state_machine.running:
-                    TNetwork._debug("        %r (running)", state_machine)
+                    TNetwork._debug("    %r (running)", state_machine)
                 elif not state_machine.current_state:
-                    TNetwork._debug("        %r (not started)", state_machine)
+                    TNetwork._debug("    %r (not started)", state_machine)
                 else:
-                    TNetwork._debug("        %r", state_machine)
+                    TNetwork._debug("    %r", state_machine)
                 for direction, pdu in state_machine.transaction_log:
-                    StateMachineGroup._debug("        %s %s", direction, str(pdu))
+                    TNetwork._debug("        %s %s", direction, str(pdu))
+
             # traffic log has what was processed on each vlan
             self.traffic_log.dump(TNetwork._debug)
 
