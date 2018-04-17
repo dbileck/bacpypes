@@ -15,15 +15,16 @@ from bacpypes.vlan import IPNetwork, IPRouter
 from bacpypes.bvll import (
     Result, RegisterForeignDevice,
     ReadForeignDeviceTable, ReadForeignDeviceTableAck,
+    DistributeBroadcastToNetwork, ForwardedNPDU,
     OriginalUnicastNPDU, OriginalBroadcastNPDU,
     )
 
-from ..state_machine import StateMachineGroup
+from ..state_machine import StateMachineGroup, TrafficLog
 from ..time_machine import reset_time_machine, run_time_machine
 
 from .helpers import (
-    SnifferStateMachine, BIPSimpleStateMachine,
-    BIPForeignStateMachine, BIPBBMDStateMachine,
+    SnifferStateMachine, BIPStateMachine,
+    BIPSimpleStateMachine, BIPForeignStateMachine, BIPBBMDStateMachine,
     )
 
 # some debugging
@@ -46,15 +47,20 @@ class TNetwork(StateMachineGroup):
         reset_time_machine()
         if _debug: TNetwork._debug("    - time machine reset")
 
+        # create a traffic log
+        self.traffic_log = TrafficLog()
+
         # make a router
         self.router = IPRouter()
 
         # make a home LAN
-        self.home_vlan = IPNetwork()
+        self.home_vlan = IPNetwork("192.168.5.0/24")
+        self.home_vlan.traffic_log = self.traffic_log
         self.router.add_network(Address("192.168.5.1/24"), self.home_vlan)
 
         # make a remote LAN
-        self.remote_vlan = IPNetwork()
+        self.remote_vlan = IPNetwork("192.168.6.0/24")
+        self.remote_vlan.traffic_log = self.traffic_log
         self.router.add_network(Address("192.168.6.1/24"), self.remote_vlan)
 
         # the foreign device
@@ -88,6 +94,8 @@ class TNetwork(StateMachineGroup):
                     TNetwork._debug("        %r", state_machine)
                 for direction, pdu in state_machine.transaction_log:
                     StateMachineGroup._debug("        %s %s", direction, str(pdu))
+            # traffic log has what was processed on each vlan
+            self.traffic_log.dump(TNetwork._debug)
 
         assert all_success
 
@@ -136,7 +144,7 @@ class TestForeign(unittest.TestCase):
         tnet.bbmd.start_state.success()
 
         # home snooper node
-        home_snooper = SnifferStateMachine("192.168.5.2/24", tnet.home_vlan)
+        home_snooper = BIPStateMachine("192.168.5.2/24", tnet.home_vlan)
         tnet.append(home_snooper)
 
         # snooper will read the foreign device table
@@ -251,7 +259,7 @@ class TestForeign(unittest.TestCase):
 
         # the bbmd is happy when it gets the pdu
         tnet.bbmd.start_state.doc("4-2-0") \
-            .receive(OriginalBroadcastNPDU, pduSource=tnet.fd.address, pduData=pdu_data).doc("4-2-1") \
+            .receive(PDU, pduSource=tnet.fd.address, pduData=pdu_data).doc("4-2-1") \
             .success()
 
         # home simple node
@@ -272,7 +280,7 @@ class TestForeign(unittest.TestCase):
             .receive(RegisterForeignDevice).doc("4-4-1") \
             .receive(Result).doc("4-4-2") \
             .set_event('4-registered') \
-            .receive(OriginalBroadcastNPDU).doc("4-4-3") \
+            .receive(DistributeBroadcastToNetwork).doc("4-4-3") \
             .success()
 
         # run the group

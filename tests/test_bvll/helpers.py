@@ -94,7 +94,7 @@ class FauxMultiplexer(Client, Server):
 class SnifferStateMachine(ClientStateMachine):
 
     """This class acts as a sniffer for BVLL messages.  The client state
-    machine sits above and Annex-J codec so the send and receive PDUs are
+    machine sits above an Annex-J codec so the send and receive PDUs are
     BVLL PDUs.
     """
 
@@ -115,6 +115,37 @@ class SnifferStateMachine(ClientStateMachine):
         # might receive all packets and allow spoofing
         self.mux.node.promiscuous = True
         self.mux.node.spoofing = True
+
+        # bind the stack together
+        bind(self, self.annexj, self.mux)
+
+
+#
+#   BIPStateMachine
+#
+
+@bacpypes_debugging
+class BIPStateMachine(ClientStateMachine):
+
+    """This class is an application layer for BVLL messages that has no BVLL
+    processing like the 'simple', 'foreign', or 'bbmd' versions.  The client
+    state machine sits above and Annex-J codec so the send and receive PDUs are
+    BVLL PDUs.
+    """
+
+    def __init__(self, address, vlan):
+        if _debug: BIPStateMachine._debug("__init__ %r %r", address, vlan)
+        ClientStateMachine.__init__(self)
+
+        # save the name and address
+        self.name = address
+        self.address = Address(address)
+
+        # BACnet/IP interpreter
+        self.annexj = AnnexJCodec()
+
+        # fake multiplexer has a VLAN node in it
+        self.mux = FauxMultiplexer(self.address, vlan)
 
         # bind the stack together
         bind(self, self.annexj, self.mux)
