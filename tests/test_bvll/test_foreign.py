@@ -83,9 +83,9 @@ class TNetwork(StateMachineGroup):
 
         # check for success
         all_success, some_failed = super(TNetwork, self).check_for_success()
-        TNetwork._debug("    - all_success, some_failed: %r, %r", all_success, some_failed)
 
-        if _debug and (not all_success):
+        if _debug:
+            TNetwork._debug("    - all_success, some_failed: %r, %r", all_success, some_failed)
             for state_machine in self.state_machines:
                 if state_machine.running:
                     TNetwork._debug("    %r (running)", state_machine)
