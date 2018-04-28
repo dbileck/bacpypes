@@ -247,6 +247,32 @@ class BIPBBMDStateMachine(ClientStateMachine):
         bind(self, self.bip, self.annexj, self.mux)
 
 #
+#   BIPSimpleNode
+#
+
+@bacpypes_debugging
+class BIPSimpleNode:
+
+    """This class is a BIPSimple instance that is not bound to a state machine."""
+
+    def __init__(self, address, vlan):
+        if _debug: BIPSimpleNode._debug("__init__ %r %r", address, vlan)
+
+        # save the name and address
+        self.name = address
+        self.address = Address(address)
+
+        # BACnet/IP interpreter
+        self.bip = BIPSimple()
+        self.annexj = AnnexJCodec()
+
+        # fake multiplexer has a VLAN node in it
+        self.mux = FauxMultiplexer(self.address, vlan)
+
+        # bind the stack together
+        bind(self.bip, self.annexj, self.mux)
+
+#
 #   BIPBBMDNode
 #
 

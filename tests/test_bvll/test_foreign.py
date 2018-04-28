@@ -54,21 +54,21 @@ class TNetwork(StateMachineGroup):
         self.router = IPRouter()
 
         # make a home LAN
-        self.home_vlan = IPNetwork("192.168.5.0/24")
-        self.home_vlan.traffic_log = self.traffic_log
-        self.router.add_network(Address("192.168.5.1/24"), self.home_vlan)
+        self.vlan_5 = IPNetwork("192.168.5.0/24")
+        self.vlan_5.traffic_log = self.traffic_log
+        self.router.add_network(Address("192.168.5.1/24"), self.vlan_5)
 
         # make a remote LAN
-        self.remote_vlan = IPNetwork("192.168.6.0/24")
-        self.remote_vlan.traffic_log = self.traffic_log
-        self.router.add_network(Address("192.168.6.1/24"), self.remote_vlan)
+        self.vlan_6 = IPNetwork("192.168.6.0/24")
+        self.vlan_6.traffic_log = self.traffic_log
+        self.router.add_network(Address("192.168.6.1/24"), self.vlan_6)
 
         # the foreign device
-        self.fd = BIPForeignStateMachine("192.168.6.2/24", self.remote_vlan)
+        self.fd = BIPForeignStateMachine("192.168.6.2/24", self.vlan_6)
         self.append(self.fd)
 
         # bbmd
-        self.bbmd = BIPBBMDStateMachine("192.168.5.3/24", self.home_vlan)
+        self.bbmd = BIPBBMDStateMachine("192.168.5.3/24", self.vlan_5)
         self.append(self.bbmd)
 
     def run(self, time_limit=60.0):
@@ -132,7 +132,7 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # remote sniffer node
-        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.vlan_6)
         tnet.append(remote_sniffer)
 
         # sniffer traffic
@@ -146,7 +146,7 @@ class TestForeign(unittest.TestCase):
         tnet.bbmd.start_state.success()
 
         # home snooper node
-        home_snooper = BIPStateMachine("192.168.5.2/24", tnet.home_vlan)
+        home_snooper = BIPStateMachine("192.168.5.2/24", tnet.vlan_5)
         tnet.append(home_snooper)
 
         # snooper will read the foreign device table
@@ -157,7 +157,7 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # home sniffer node
-        home_sniffer = SnifferStateMachine("192.168.5.254/24", tnet.home_vlan)
+        home_sniffer = SnifferStateMachine("192.168.5.254/24", tnet.vlan_5)
         tnet.append(home_sniffer)
 
         # sniffer traffic
@@ -187,7 +187,7 @@ class TestForeign(unittest.TestCase):
         tnet.bbmd.start_state.success()
 
         # remote sniffer node
-        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.vlan_6)
         tnet.append(remote_sniffer)
 
         # sniffer traffic
@@ -226,7 +226,7 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # remote sniffer node
-        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.vlan_6)
         tnet.append(remote_sniffer)
 
         # sniffer traffic
@@ -265,7 +265,7 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # home simple node
-        home_node = BIPSimpleStateMachine("192.168.5.254/24", tnet.home_vlan)
+        home_node = BIPSimpleStateMachine("192.168.5.254/24", tnet.vlan_5)
         tnet.append(home_node)
 
         # home node happy when getting the pdu, broadcast by the bbmd
@@ -274,7 +274,7 @@ class TestForeign(unittest.TestCase):
             .success()
 
         # remote sniffer node
-        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.remote_vlan)
+        remote_sniffer = SnifferStateMachine("192.168.6.254/24", tnet.vlan_6)
         tnet.append(remote_sniffer)
 
         # remote traffic
