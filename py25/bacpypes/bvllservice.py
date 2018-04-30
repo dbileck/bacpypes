@@ -748,8 +748,9 @@ class BIPBBMD(BIPSAP, Client, Server, RecurringTask, DebugContents):
 
         elif isinstance(pdu, WriteBroadcastDistributionTable):
             # build a response
-            xpdu = Result(code=99, user_data=pdu.pduUserData)
+            xpdu = Result(code=0x0010, user_data=pdu.pduUserData)
             xpdu.pduDestination = pdu.pduSource
+            if _debug: BIPBBMD._debug("    - xpdu: %r", xpdu)
 
             # send it downstream
             self.request(xpdu)
@@ -768,12 +769,13 @@ class BIPBBMD(BIPSAP, Client, Server, RecurringTask, DebugContents):
             self.sap_response(pdu)
 
         elif isinstance(pdu, ForwardedNPDU):
-            # build a PDU with the source from the real source
-            xpdu = PDU(pdu.pduData, source=pdu.bvlciAddress, destination=LocalBroadcast(), user_data=pdu.pduUserData)
-            if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
+            # send it upstream if there is a network layer
+            if self.serverPeer:
+                # build a PDU with a local broadcast address
+                xpdu = PDU(pdu.pduData, source=pdu.bvlciAddress, destination=LocalBroadcast(), user_data=pdu.pduUserData)
+                if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
 
-            # send it upstream
-            self.response(xpdu)
+                self.response(xpdu)
 
             # build a forwarded NPDU to send out
             xpdu = ForwardedNPDU(pdu.bvlciAddress, pdu, destination=None, user_data=pdu.pduUserData)
@@ -827,12 +829,13 @@ class BIPBBMD(BIPSAP, Client, Server, RecurringTask, DebugContents):
             self.request(xpdu)
 
         elif isinstance(pdu, DistributeBroadcastToNetwork):
-            # build a PDU with a local broadcast address
-            xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=LocalBroadcast(), user_data=pdu.pduUserData)
-            if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
+            # send it upstream if there is a network layer
+            if self.serverPeer:
+                # build a PDU with a local broadcast address
+                xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=LocalBroadcast(), user_data=pdu.pduUserData)
+                if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
 
-            # send it upstream
-            self.response(xpdu)
+                self.response(xpdu)
 
             # build a forwarded NPDU to send out
             xpdu = ForwardedNPDU(pdu.pduSource, pdu, user_data=pdu.pduUserData)
@@ -857,20 +860,22 @@ class BIPBBMD(BIPSAP, Client, Server, RecurringTask, DebugContents):
                     self.request(xpdu)
 
         elif isinstance(pdu, OriginalUnicastNPDU):
-            # build a vanilla PDU
-            xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=pdu.pduDestination, user_data=pdu.pduUserData)
-            if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
+            # send it upstream if there is a network layer
+            if self.serverPeer:
+                # build a PDU with a local broadcast address
+                xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=pdu.pduDestination, user_data=pdu.pduUserData)
+                if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
 
-            # send it upstream
-            self.response(xpdu)
+                self.response(xpdu)
 
         elif isinstance(pdu, OriginalBroadcastNPDU):
-            # build a PDU with a local broadcast address
-            xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=LocalBroadcast(), user_data=pdu.pduUserData)
-            if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
+            # send it upstream if there is a network layer
+            if self.serverPeer:
+                # build a PDU with a local broadcast address
+                xpdu = PDU(pdu.pduData, source=pdu.pduSource, destination=LocalBroadcast(), user_data=pdu.pduUserData)
+                if _debug: BIPBBMD._debug("    - upstream xpdu: %r", xpdu)
 
-            # send it upstream
-            self.response(xpdu)
+                self.response(xpdu)
 
             # make a forwarded PDU
             xpdu = ForwardedNPDU(pdu.pduSource, pdu, user_data=pdu.pduUserData)
