@@ -6,9 +6,18 @@ B/IP VLAN Helper Classes
 
 from bacpypes.debugging import bacpypes_debugging, ModuleLogger
 
-from bacpypes.comm import Client, Server, bind
+from bacpypes.comm import Client, Server, ApplicationServiceElement, bind
 from bacpypes.pdu import Address, LocalBroadcast, PDU, unpack_ip_addr
 from bacpypes.vlan import IPNode
+
+from bacpypes.app import DeviceInfoCache, Application
+from bacpypes.appservice import StateMachineAccessPoint, ApplicationServiceAccessPoint
+from bacpypes.netservice import NetworkServiceAccessPoint, NetworkServiceElement
+
+from bacpypes.object import register_object_type
+from bacpypes.local.device import LocalDeviceObject
+from bacpypes.service.device import WhoIsIAmServices
+from bacpypes.service.object import ReadWritePropertyServices
 
 from ..state_machine import ClientStateMachine
 
@@ -287,6 +296,7 @@ class BIPBBMDNode:
         # save the name and address
         self.name = address
         self.address = Address(address)
+        if _debug: BIPBBMDNode._debug("    - address: %r", self.address)
 
         # BACnet/IP interpreter
         self.bip = BIPBBMD(self.address)
@@ -305,4 +315,149 @@ class BIPBBMDNode:
         # bind the stack together
         bind(self.bip, self.annexj, self.mux)
 
+
+#
+#   TestDeviceObject
+#
+
+@register_object_type(vendor_id=999)
+class TestDeviceObject(LocalDeviceObject):
+
+    pass
+
+#
+#   BIPSimpleApplicationLayerStateMachine
+#
+
+@bacpypes_debugging
+class BIPSimpleApplicationLayerStateMachine(ApplicationServiceElement, ClientStateMachine):
+
+    def __init__(self, address, vlan):
+        if _debug: BIPSimpleApplicationLayerStateMachine._debug("__init__ %r %r", address, vlan)
+
+        # build a name, save the address
+        self.name = "app @ %s" % (address,)
+        self.address = Address(address)
+
+        # build a local device object
+        local_device = TestDeviceObject(
+            objectName=self.name,
+            objectIdentifier=('device', 998),
+            vendorIdentifier=999,
+            )
+
+        # build an address and save it
+        self.address = Address(address)
+        if _debug: BIPSimpleApplicationLayerStateMachine._debug("    - address: %r", self.address)
+
+        # continue with initialization
+        ApplicationServiceElement.__init__(self)
+        ClientStateMachine.__init__(self, name=local_device.objectName)
+
+        # include a application decoder
+        self.asap = ApplicationServiceAccessPoint()
+
+        # pass the device object to the state machine access point so it
+        # can know if it should support segmentation
+        self.smap = StateMachineAccessPoint(local_device)
+
+        # the segmentation state machines need access to some device
+        # information cache, usually shared with the application
+        self.smap.deviceInfoCache = DeviceInfoCache()
+
+        # a network service access point will be needed
+        self.nsap = NetworkServiceAccessPoint()
+
+        # give the NSAP a generic network layer service element
+        self.nse = NetworkServiceElement()
+        bind(self.nse, self.nsap)
+
+        # bind the top layers
+        bind(self, self.asap, self.smap, self.nsap)
+
+        # BACnet/IP interpreter
+        self.bip = BIPSimple()
+        self.annexj = AnnexJCodec()
+
+        # fake multiplexer has a VLAN node in it
+        self.mux = FauxMultiplexer(self.address, vlan)
+
+        # bind the stack together
+        bind(self.bip, self.annexj, self.mux)
+
+        # bind the stack to the local network
+        self.nsap.bind(self.bip)
+
+    def indication(self, apdu):
+        if _debug: BIPSimpleApplicationLayerStateMachine._debug("indication %r", apdu)
+        self.receive(apdu)
+
+    def confirmation(self, apdu):
+        if _debug: BIPSimpleApplicationLayerStateMachine._debug("confirmation %r %r", apdu)
+        self.receive(apdu)
+
+#
+#   BIPBBMDApplication
+#
+
+class BIPBBMDApplication(Application, WhoIsIAmServices, ReadWritePropertyServices):
+
+    def __init__(self, address, vlan):
+        if _debug: BIPBBMDApplication._debug("__init__ %r %r", address, vlan)
+
+        # build a name, save the address
+        self.name = "app @ %s" % (address,)
+        self.address = Address(address)
+        if _debug: BIPBBMDApplication._debug("    - address: %r", self.address)
+
+        # build a local device object
+        local_device = TestDeviceObject(
+            objectName=self.name,
+            objectIdentifier=('device', 999),
+            vendorIdentifier=999,
+            )
+
+        # continue with initialization
+        Application.__init__(self, local_device, self.address)
+
+        # include a application decoder
+        self.asap = ApplicationServiceAccessPoint()
+
+        # pass the device object to the state machine access point so it
+        # can know if it should support segmentation
+        self.smap = StateMachineAccessPoint(local_device)
+
+        # the segmentation state machines need access to the same device
+        # information cache as the application
+        self.smap.deviceInfoCache = self.deviceInfoCache
+
+        # a network service access point will be needed
+        self.nsap = NetworkServiceAccessPoint()
+
+        # give the NSAP a generic network layer service element
+        self.nse = NetworkServiceElement()
+        bind(self.nse, self.nsap)
+
+        # bind the top layers
+        bind(self, self.asap, self.smap, self.nsap)
+
+        # BACnet/IP interpreter
+        self.bip = BIPBBMD(self.address)
+        self.annexj = AnnexJCodec()
+
+        # build an address, full mask
+        bdt_address = "%s/32:%d" % self.address.addrTuple
+        if _debug: BIPBBMDNode._debug("    - bdt_address: %r", bdt_address)
+
+        # add itself as the first entry in the BDT
+        self.bip.add_peer(Address(bdt_address))
+
+        # fake multiplexer has a VLAN node in it
+        self.mux = FauxMultiplexer(self.address, vlan)
+
+        # bind the stack together
+        bind(self.bip, self.annexj, self.mux)
+
+        # bind the stack to the local network
+        self.nsap.bind(self.bip)
 
