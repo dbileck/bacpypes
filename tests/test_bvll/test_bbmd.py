@@ -209,24 +209,25 @@ class TestNonBBMD(unittest.TestCase):
 
 
 @bacpypes_debugging
-class TestSomething(unittest.TestCase):
+class TestBBMD(unittest.TestCase):
 
-    def test_something(self):
-        """Forward an NPDU, one hop broadcast."""
-        if _debug: TestSomething._debug("test_something")
+    def test_14_2_1_1(self):
+        """14.2.1.1 Execute Forwarded-NPDU (One-hop Distribution)."""
+        if _debug: TestBBMD._debug("test_14_2_1_1")
 
         # create a network
         tnet = TNetwork(2)
 
         # implementation under test
         iut = BIPBBMDApplication("192.168.1.2/24", tnet.vlan[0])
+        if _debug: TestBBMD._debug("    - iut.bip: %r", iut.bip)
 
         # BBMD on net 2
         bbmd1 = BIPBBMDNode("192.168.2.2/24", tnet.vlan[1])
 
         # add the IUT as a one-hop peer
         bbmd1.bip.add_peer(Address("192.168.1.2/24"))
-        if _debug: TestSomething._debug("    - bbmd1.bip: %r", bbmd1.bip)
+        if _debug: TestBBMD._debug("    - bbmd1.bip: %r", bbmd1.bip)
 
         # test device
         td = BIPSimpleApplicationLayerStateMachine("192.168.2.3/24", tnet.vlan[1])
@@ -249,6 +250,51 @@ class TestSomething(unittest.TestCase):
             .receive(ForwardedNPDU).doc("2-2-1") \
             .receive(OriginalUnicastNPDU).doc("2-2-2") \
             .timeout(3).doc("2-2-3") \
+            .success()
+
+        # run the group
+        tnet.run()
+
+    def test_14_2_1_2(self):
+        """14.2.1.1 Execute Forwarded-NPDU (Two-hop Distribution)."""
+        if _debug: TestBBMD._debug("test_14_2_1_2")
+
+        # create a network
+        tnet = TNetwork(2)
+
+        # implementation under test
+        iut = BIPBBMDApplication("192.168.1.2/24", tnet.vlan[0])
+        if _debug: TestBBMD._debug("    - iut.bip: %r", iut.bip)
+
+        # BBMD on net 2
+        bbmd1 = BIPBBMDNode("192.168.2.2/24", tnet.vlan[1])
+
+        # add the IUT as a two-hop peer
+        bbmd1.bip.add_peer(Address("192.168.1.2/32"))
+        if _debug: TestBBMD._debug("    - bbmd1.bip: %r", bbmd1.bip)
+
+        # test device
+        td = BIPSimpleApplicationLayerStateMachine("192.168.2.3/24", tnet.vlan[1])
+        tnet.append(td)
+
+        # listener looks for extra traffic
+        listener = BIPStateMachine("192.168.1.3/24", tnet.vlan[0])
+        listener.mux.node.promiscuous = True
+        tnet.append(listener)
+
+        # broadcast a forwarded NPDU
+        td.start_state.doc("2-3-0") \
+            .send(WhoIsRequest(destination=LocalBroadcast())).doc("2-3-1") \
+            .receive(IAmRequest).doc("2-3-2") \
+            .success()
+
+        # listen for the forwarded NPDU, then the re-braodcast on the local LAN
+        # then the original unicast going back, then fail if there's anything else
+        listener.start_state.doc("2-4-0") \
+            .receive(ForwardedNPDU).doc("2-4-1") \
+            .receive(ForwardedNPDU).doc("2-4-2") \
+            .receive(OriginalUnicastNPDU).doc("2-4-3") \
+            .timeout(3).doc("2-4-4") \
             .success()
 
         # run the group
