@@ -213,7 +213,7 @@ class IPNode(Node):
 @bacpypes_debugging
 class IPRouterNode(Client):
 
-    def __init__(self, router, addr, lan=None):
+    def __init__(self, router, addr, lan):
         if _debug: IPRouterNode._debug("__init__ %r %r lan=%r", router, addr, lan)
 
         # save the reference to the router
@@ -237,6 +237,9 @@ class IPRouterNode(Client):
 
         # pass it downstream
         self.request(pdu)
+
+    def __repr__(self):
+        return "<%s for %s>" % (self.__class__.__name__, self.lan.name)
 
 #
 #   IPRouter
